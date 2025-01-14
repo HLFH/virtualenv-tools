@@ -255,16 +255,33 @@ def get_orig_path(venv_path: str) -> str:
 
     with open(activate_path) as activate:
         venv_var_prefix = 'VIRTUAL_ENV='
-        for line in activate:
-            # virtualenv 20 changes the position
-            if line.startswith(venv_var_prefix):
-                return shlex.split(line[len(venv_var_prefix):])[0]
-        else:
-            raise AssertionError(
-                'Could not find VIRTUAL_ENV= in activation script: %s' %
-                activate_path
-            )
+        in_case_block = False
+        case_path = None
+        system = None
 
+        for line in activate:
+            if 'case "$(uname)" in' in line:
+                in_case_block = True
+            elif in_case_block and ';;' in line:
+                in_case_block = False
+                if case_path:
+                    return case_path
+            elif in_case_block and venv_var_prefix in line:
+                # Determine which OS we're on
+                if not system:
+                    import platform
+                    system = platform.system().lower()
+                if system in ['cygwin', 'msys', 'mingw']:
+                    if 'CYGWIN*|MSYS*|MINGW*' in line:
+                        case_path = line.split(venv_var_prefix)[1].split(')')[0].strip().strip("'\"")
+                else:
+                    case_path = line.split(venv_var_prefix)[1].strip().strip("'\"")
+            elif line.startswith('export ') and venv_var_prefix in line:
+                return line.split('=')[1].strip().strip("'\"")
+
+        if not case_path:
+            raise AssertionError('Could not find VIRTUAL_ENV= in activation script: %s' % activate_path)
+        return case_path
 
 class NotAVirtualenvError(ValueError):
     def __str__(self) -> str:
